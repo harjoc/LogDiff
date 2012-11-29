@@ -8,12 +8,30 @@ class LogDiff;
 }
 
 struct Match {
-    Match(double similarity=0, const QString &id1=QString(), const QString &id2=QString()):
-        similarity(similarity), id1(id1), id2(id2) { }
+    Match(int removals=-1, int additions=-1, int lines1=-1, int lines2=-1, const QString &id1=QString(), const QString &id2=QString()):
+        removals(removals),
+        additions(additions),
+        lines1(lines1),
+        lines2(lines2),
+        id1(id1),
+        id2(id2) { }
 
-    double similarity;
+    int removals;
+    int additions;
+    int lines1;
+    int lines2;
     QString id1;
     QString id2;
+
+    double similarity() const {
+        double s = lines1 - removals;
+        return s / (double)lines1;
+    }
+
+    double revSimilarity() const {
+        double s = lines2 - additions;
+        return s * 100 / (double)lines2;
+    }
 };
 
 class LogDiff : public QMainWindow
@@ -41,6 +59,7 @@ private:
     bool matchThreads(const QStringList &ids1,
                       const QStringList &ids2,
                       const QHash<QString, int> &lineNums1,
+                      const QHash<QString, int> &lineNums2,
                       QList<Match> &bestMatches,
                       QList<Match> &otherMatches,
                       bool &slow);

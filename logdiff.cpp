@@ -267,6 +267,7 @@ bool LogDiff::matchThreads(
         const QStringList &ids1,
         const QStringList &ids2,
         const QHash<QString, int> &lineNums1,
+        const QHash<QString, int> &lineNums2,
         QList<Match> &bestMatches,
         QList<Match> &otherMatches,
         bool &slow)
@@ -362,9 +363,14 @@ bool LogDiff::matchThreads(
                 return false;
             }
 
+            QString id2;
+
             // diff doesn't output anything for identical files
-            while (i2 < ids2.size() && ids2.at(i2) != name2) {
-                matches.append(Match(100, id1, ids2.at(i2)));
+            while (i2 < ids2.size()) {
+                id2 = ids2.at(i2);
+                if (id2 == name2) break;
+
+                matches.append(Match(0, 0, lineNums1[id1], lineNums2[id2], id1, id2));
                 i2++;
             }
 
@@ -379,7 +385,8 @@ bool LogDiff::matchThreads(
             // read the diff lines as context-independent, and avoid looking
             // at the @@ lines and the gross parsing.
 
-            int removes = 0;
+            int removals = 0;
+            int additions = 0;
             for (;;) {
                 QString line = diffProc.readLine(1024);
                 if (line.isEmpty() || line.startsWith("--- 0-")) {
@@ -388,19 +395,22 @@ bool LogDiff::matchThreads(
                 }
 
                 if (line.startsWith("-"))
-                    removes++;
+                    removals++;
+                if (line.startsWith("+"))
+                    additions++;
             }
 
-            double equals = lineNums1[id1] - removes;
-            double total = lineNums1[id1];
-            matches.append(Match(equals*100/total, id1, ids2.at(i2)));
+            matches.append(Match(removals, additions,
+                    lineNums1[id1], lineNums2[id2],
+                    id1, id2));
 
             i2++;
         }
 
         // end of diff output, so the rest of the files are identical
         while (i2 < ids2.size()) {
-            matches.append(Match(100, id1, ids2.at(i2)));
+            QString id2 = ids2.at(i2);
+            matches.append(Match(0, 0, lineNums1[id1], lineNums2[id2], id1, id2));
             i2++;
         }
     }
@@ -408,11 +418,15 @@ bool LogDiff::matchThreads(
 
     QHash<QString,QString> matchSet;
 
+    // maybe:
+    //   (total1-removals) + (total2-additions) / (total1+total2)
+    // works better
+
     foreach (QString id1, ids1) {
-        Match best(-1);
+        Match best;
         foreach (Match match, matches)
             if (match.id1 == id1)
-                if (best.similarity < match.similarity)
+                if (best.lines1 < 0 || best.lines1-best.removals < match.lines1-match.removals)
                     best = match;
 
         matchSet[id1] = best.id2;
@@ -420,10 +434,10 @@ bool LogDiff::matchThreads(
     }
 
     foreach (QString id2, ids2) {
-        Match best(-1);
+        Match best;
         foreach (Match match, matches)
             if (match.id2 == id2)
-                if (best.similarity < match.similarity)
+                if (best.lines2 < 0 || best.lines2-best.additions < match.lines2-match.additions)
                     best = match;
 
         if (matchSet[best.id1] != best.id2)
@@ -455,7 +469,7 @@ void LogDiff::addMatch(const Match &match,
     printf(QString("%1 - %2 (%3%%)\n")
                 .arg(match.id1)
                 .arg(match.id2)
-                .arg(match.similarity)
+                .arg(match.similarity())
             .toAscii().data());
 
     QTableWidget *t = ui->threadsTable;
@@ -483,7 +497,7 @@ void LogDiff::addMatch(const Match &match,
         pidtid2[1],
         QString::number(lineNums1[match.id1]),
         QString::number(lineNums2[match.id2]),
-        QString().sprintf("%.0f%%", match.similarity),
+        QString().sprintf("%.0f%%", match.similarity()),
         firstLine1.right(firstLine1.size()-comma),
     };
     for (int col=0; col<8; col++)
@@ -509,7 +523,7 @@ void LogDiff::processLogs()
         return;
 
     QList<Match> bestMatches, otherMatches;
-    if (!matchThreads(ids1, ids2, lineNums1, bestMatches, otherMatches, slow))
+    if (!matchThreads(ids1, ids2, lineNums1, lineNums2, bestMatches, otherMatches, slow))
         return;    
 
     printf("--- best matches\n");
