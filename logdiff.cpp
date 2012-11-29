@@ -4,6 +4,7 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QProcess>
+#include <QProgressDialog>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -41,7 +42,7 @@ LogDiff::LogDiff(QWidget *parent) :
          t->setColumnWidth(i, widths[i]);
     }
 
-    #if 1
+    #if 0
     ui->log1Edit->setText("D:/dev/logdiff/inputs/s1.csv");
     ui->log2Edit->setText("D:/dev/logdiff/inputs/s2.csv");
     #endif
@@ -149,7 +150,16 @@ bool LogDiff::initSession()
     return true;
 }
 
-bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lineNums)
+void removeBom(QByteArray &line)
+{
+    int endOfBom = 0;
+    while (endOfBom<line.size() && 127 < (unsigned char)line.at(endOfBom))
+        endOfBom++;
+    if (endOfBom)
+        line.remove(0, endOfBom);
+}
+
+bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lineNums, bool &slow)
 {
     QString logFname = logNo ? ui->log2Edit->text() : ui->log1Edit->text();
     QFile logFile(logFname);
@@ -165,11 +175,36 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
 
     QRegExp numbers("0x[0-9a-f]+|[0-9][0-9]+|[0-9a-z]+-[0-9a-z]+-[0-9a-z]+-[0-9a-z]+-[0-9a-z]+|[0-9]+:[0-9]+:[0-9]+| PM| AM", Qt::CaseInsensitive);
 
-    for (;;) {
+    QProgressDialog progress;
+    progress.setLabelText(QString("Splitting log file #%1 ...").arg(logNo+1));
+    progress.setMinimum(0);
+    progress.setMaximum(100);
+    progress.setMinimumDuration(250);
+    progress.setValue(0);
+
+    if (slow) {
+        progress.show();
+        QApplication::processEvents();
+    }
+
+    bool firstLine = true;
+
+    for (int counter=0; ; counter++) {
+        if (counter % 2000 == 0)
+            QApplication::processEvents();
+
         QByteArray line = logFile.readLine(1024);
+        if (firstLine) {
+            firstLine = false;
+            removeBom(line);
+        }
+
         if (line.isEmpty()) break;
 
         QList<QByteArray> fields = line.split(',');
+        if (fields.size() < 5)
+            continue;
+
         QString pid = fields[2].mid(1, fields[2].size()-2);
         QString tid = fields[3].mid(1, fields[3].size()-2);
 
@@ -224,6 +259,7 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
     foreach (QFile *file, matchFiles)
         delete file;
 
+    slow |= progress.isVisible();
     return ret;
 }
 
@@ -231,18 +267,41 @@ bool LogDiff::matchThreads(
         const QStringList &ids1,
         const QStringList &ids2,
         const QHash<QString, int> &lineNums1,
-        QList<Match> &matchLst)
+        QList<Match> &matchLst, bool &slow)
 {
     QList<Match> matches;
 
+    int npairs = ids1.size()*ids2.size();
+    int cpair = 0;
+
+    QProgressDialog progress;
+    progress.setLabelText(QString("Matching %1*%2 threads ...").arg(ids1.size()).arg(ids2.size()));
+    progress.setMinimum(0);
+    progress.setMaximum(npairs);
+    progress.setMinimumDuration(500);
+    progress.setValue(0);
+
+    if (slow) {
+        progress.show();
+        QApplication::processEvents();
+    }
+
     foreach (QString id1, ids1)
         foreach (QString id2, ids2) {
+            progress.setValue(cpair++);
+            QApplication::processEvents();
+            if (progress.wasCanceled())
+                return false;
+
             QProcess diffProc;
             QString fname1 = QDir(sessionDir).filePath(QString("0-%1.match").arg(id1));
             QString fname2 = QDir(sessionDir).filePath(QString("1-%1.match").arg(id2));
             printf("diff %s %s\n", fname1.toAscii().data(), fname2.toAscii().data());
 
-            diffProc.start("diff", QStringList() << "-du" << fname1 << fname2);
+            diffProc.start("diff", QStringList() <<
+                "-d" <<
+                "-u" <<
+                fname1 << fname2);
             if (!diffProc.waitForFinished() || diffProc.exitCode() >= 2) {
                 error("Diff error", QString("Could not diff %1 and %2").arg(fname1).arg(fname2));
                 return false;
@@ -250,7 +309,8 @@ bool LogDiff::matchThreads(
 
             QString hdr1 = diffProc.readLine(1024);
             QString hdr2 = diffProc.readLine(1024);
-            if (hdr1.isEmpty() || hdr2.isEmpty()) {
+
+            if (hdr1.isEmpty() ^ hdr2.isEmpty()) {
                 error("Diff error", QString("Incomplete diff output for %1 and %2").arg(fname1).arg(fname2));
                 return false;
             }
@@ -296,6 +356,7 @@ bool LogDiff::matchThreads(
             matchLst.append(best);
     }
 
+    slow |= progress.isVisible();
     return true;
 }
 
@@ -310,7 +371,7 @@ bool LogDiff::getFirstLine(const QString &fname, QString &firstLine)
     QString line = f.readLine(1024).trimmed();
 
     firstLine = line;
-    return true; // trim up to operation
+    return true;
 }
 
 void LogDiff::processLogs()
@@ -324,13 +385,15 @@ void LogDiff::processLogs()
 
     QHash<QString, int> lineNums1, lineNums2;
 
-    if (!splitThreads(0, ids1, lineNums1))
+    bool slow=false;
+
+    if (!splitThreads(0, ids1, lineNums1, slow))
         return;
-    if (!splitThreads(1, ids2, lineNums2))
+    if (!splitThreads(1, ids2, lineNums2, slow))
         return;
 
     QList<Match> matchLst;
-    if (!matchThreads(ids1, ids2, lineNums1, matchLst))
+    if (!matchThreads(ids1, ids2, lineNums1, matchLst, slow))
         return;
 
     QTableWidget *t = ui->threadsTable;
@@ -352,7 +415,13 @@ void LogDiff::processLogs()
         QString fname2 = QDir(sessionDir).filePath(QString("1-%1.csv").arg(match.id2));
         QString firstLine1, firstLine2;
         if (!getFirstLine(fname1, firstLine1)) return;
-        if (!getFirstLine(fname2, firstLine2)) return;
+
+        int comma=0;
+        for (int i=0; i<4; i++) {
+            int ncomma = firstLine1.indexOf(',', comma);
+            if (ncomma<0) { comma=0; break; }
+            comma = ncomma+1;
+        }
 
         QString items[] = {
             pidtid1[0],
@@ -362,7 +431,7 @@ void LogDiff::processLogs()
             QString::number(lineNums1[match.id1]),
             QString::number(lineNums2[match.id2]),
             QString().sprintf("%.0f%%", match.similarity),
-            firstLine1,
+            firstLine1.right(firstLine1.size()-comma),
         };
 
         for (int col=0; col<8; col++)

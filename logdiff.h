@@ -37,11 +37,11 @@ private:
 
     void error(const QString &title, const QString &text);
     void processLogs();
-    bool splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lineNums);
+    bool splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lineNums, bool &slow);
     bool matchThreads(const QStringList &ids1,
                       const QStringList &ids2,
                       const QHash<QString, int> &lineNums1,
-                      QList<Match> &matchLst);
+                      QList<Match> &matchLst, bool &slow);
     bool getFirstLine(const QString &fname, QString &firstLine);
     void clearSession();
     bool initSession();
