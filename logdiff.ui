@@ -81,7 +81,7 @@
       <item>
        <widget class="QLabel" name="label_3">
         <property name="text">
-         <string>Threads</string>
+         <string>Threads (doubleclick for diff)</string>
         </property>
        </widget>
       </item>
@@ -99,9 +99,12 @@
        </spacer>
       </item>
       <item>
-       <widget class="QLabel" name="label_4">
+       <widget class="QCheckBox" name="ignoreNumbersCheck">
         <property name="text">
-         <string>(doubleclick for diff)</string>
+         <string>Ignore numbers</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
         </property>
        </widget>
       </item>

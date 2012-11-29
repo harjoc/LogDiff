@@ -41,8 +41,13 @@ private:
     bool matchThreads(const QStringList &ids1,
                       const QStringList &ids2,
                       const QHash<QString, int> &lineNums1,
-                      QList<Match> &matchLst, bool &slow);
+                      QList<Match> &bestMatches,
+                      QList<Match> &otherMatches,
+                      bool &slow);
     bool getFirstLine(const QString &fname, QString &firstLine);
+    void addMatch(const Match &match,
+                  QHash<QString, int> lineNums1,
+                  QHash<QString, int> lineNums2);
     void clearSession();
     bool initSession();
 

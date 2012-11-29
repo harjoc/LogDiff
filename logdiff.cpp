@@ -61,7 +61,7 @@ void LogDiff::on_browse1Btn_clicked()
         return;
 
     ui->log1Edit->setText(fname);
-    processLogs();
+    ui->log2Edit->clear();
 }
 
 void LogDiff::on_browse2Btn_clicked()
@@ -76,7 +76,7 @@ void LogDiff::on_browse2Btn_clicked()
 
 void LogDiff::on_log1Edit_returnPressed()
 {
-    processLogs();
+    ui->log2Edit->clear();
 }
 
 void LogDiff::on_log2Edit_returnPressed()
@@ -267,17 +267,16 @@ bool LogDiff::matchThreads(
         const QStringList &ids1,
         const QStringList &ids2,
         const QHash<QString, int> &lineNums1,
-        QList<Match> &matchLst, bool &slow)
+        QList<Match> &bestMatches,
+        QList<Match> &otherMatches,
+        bool &slow)
 {
     QList<Match> matches;
-
-    int npairs = ids1.size()*ids2.size();
-    int cpair = 0;
 
     QProgressDialog progress;
     progress.setLabelText(QString("Matching %1*%2 threads ...").arg(ids1.size()).arg(ids2.size()));
     progress.setMinimum(0);
-    progress.setMaximum(npairs);
+    progress.setMaximum(ids1.size());
     progress.setMinimumDuration(500);
     progress.setValue(0);
 
@@ -286,51 +285,126 @@ bool LogDiff::matchThreads(
         QApplication::processEvents();
     }
 
-    foreach (QString id1, ids1)
-        foreach (QString id2, ids2) {
-            progress.setValue(cpair++);
-            QApplication::processEvents();
-            if (progress.wasCanceled())
-                return false;
+    QStringList fnameList2;
+    foreach (QString id2, ids2)
+        fnameList2.append(QString("1-%1.match").arg(id2)); // we start diff in sessionDir
 
-            QProcess diffProc;
-            QString fname1 = QDir(sessionDir).filePath(QString("0-%1.match").arg(id1));
-            QString fname2 = QDir(sessionDir).filePath(QString("1-%1.match").arg(id2));
-            printf("diff %s %s\n", fname1.toAscii().data(), fname2.toAscii().data());
+    for (int i1=0; i1<ids1.size(); i1++) {
+        progress.setValue(i1);
+        QString id1 = ids1.at(i1);
 
-            diffProc.start("diff", QStringList() <<
-                "-d" <<
-                "-u" <<
-                fname1 << fname2);
-            if (!diffProc.waitForFinished() || diffProc.exitCode() >= 2) {
-                error("Diff error", QString("Could not diff %1 and %2").arg(fname1).arg(fname2));
-                return false;
-            }
+        QApplication::processEvents();
+        if (progress.wasCanceled())
+            return false;
 
-            QString hdr1 = diffProc.readLine(1024);
+        // diff id1 agains all ids2 in one go (creating processes in windows is slow)
+
+        QString fname1 = QString("0-%1.match").arg(id1); // we start diff in sessionDir
+
+        QProcess diffProc;
+
+        QStringList args;
+        args << "-d";
+        args << "-u";
+        args << "--from-file" << fname1;
+        args.append(fnameList2);
+
+        diffProc.setWorkingDirectory(sessionDir);
+        diffProc.start("diff", args);
+
+        if (!diffProc.waitForFinished() || diffProc.exitCode() >= 2) {
+            error("Diff error", QString("Could not compare %1 to log #2").arg(fname1));
+            return false;
+        }
+
+        int i2=0;
+
+        QString hdr1 = diffProc.readLine(1024);
+
+        for (;;) {
+            // hdr1 is also left for us by at the end of this loop below
+
             QString hdr2 = diffProc.readLine(1024);
 
             if (hdr1.isEmpty() ^ hdr2.isEmpty()) {
-                error("Diff error", QString("Incomplete diff output for %1 and %2").arg(fname1).arg(fname2));
+                error("Diff error", QString("Incomplete diff output for %1").arg(fname1));
                 return false;
             }
+
+            if (hdr1.isEmpty())
+                break;
+
+            if (!hdr1.startsWith("--- 0-") || !hdr2.startsWith("+++ 1-")) {
+                error("Diff error", QString("Expecting ---/+++ and prefixes in diff output for %1").arg(fname1));
+                return false;
+            }
+
+            int sp1 = hdr1.indexOf('\t', 6);
+            int sp2 = hdr2.indexOf('\t', 6);
+            if (sp1 < 0 || sp2 < 0) {
+                error("Diff error", QString("Could not get name from diff output for %1").arg(fname1));
+                return false;
+            }
+
+            QString name1 = hdr1.mid(6, sp1-6);
+            QString name2 = hdr2.mid(6, sp2-6);
+
+            if (!name1.endsWith(".match") || !name2.endsWith(".match")) {
+                error("Diff error", QString("Unexpected names from diff output: %1 and %2").arg(name1).arg(name2));
+                return false;
+            }
+
+            name1.truncate(name1.size()-6);
+            name2.truncate(name2.size()-6);
+
+            if (name1 != id1) {
+                error("Diff error", QString("Unexpected 'from' file in diff output for %1: %2").arg(fname1).arg(name1));
+                return false;
+            }
+
+            // diff doesn't output anything for identical files
+            while (i2 < ids2.size() && ids2.at(i2) != name2) {
+                matches.append(Match(100, id1, ids2.at(i2)));
+                i2++;
+            }
+
+            if (i2 == ids2.size()) {
+                error("Diff error", QString("Unexpected 'to' file in diff output for %1: %2").arg(fname1).arg(name2));
+                return false;
+            }
+
+            // done with the header, now count the removed lines
+
+            // by assuming that no log line can begin with "--- 0-" we can
+            // read the diff lines as context-independent, and avoid looking
+            // at the @@ lines and the gross parsing.
 
             int removes = 0;
             for (;;) {
                 QString line = diffProc.readLine(1024);
-                if (line.isEmpty())
+                if (line.isEmpty() || line.startsWith("--- 0-")) {
+                    hdr1 = line;
                     break;
-                if (line.startsWith("@"))
-                    continue;
+                }
+
                 if (line.startsWith("-"))
                     removes++;
             }
 
             double equals = lineNums1[id1] - removes;
             double total = lineNums1[id1];
-            printf("equals=%lf\n", equals*100/total);
-            matches.append(Match(equals*100/total, id1, id2));
+            matches.append(Match(equals*100/total, id1, ids2.at(i2)));
+
+            i2++;
         }
+
+        // end of diff output, so the rest of the files are identical
+        while (i2 < ids2.size()) {
+            matches.append(Match(100, id1, ids2.at(i2)));
+            i2++;
+        }
+    }
+
 
     QHash<QString,QString> matchSet;
 
@@ -342,7 +416,7 @@ bool LogDiff::matchThreads(
                     best = match;
 
         matchSet[id1] = best.id2;
-        matchLst.append(best);
+        bestMatches.append(best);
     }
 
     foreach (QString id2, ids2) {
@@ -353,7 +427,7 @@ bool LogDiff::matchThreads(
                     best = match;
 
         if (matchSet[best.id1] != best.id2)
-            matchLst.append(best);
+            otherMatches.append(best);
     }
 
     slow |= progress.isVisible();
@@ -374,6 +448,48 @@ bool LogDiff::getFirstLine(const QString &fname, QString &firstLine)
     return true;
 }
 
+void LogDiff::addMatch(const Match &match,
+    QHash<QString, int> lineNums1,
+    QHash<QString, int> lineNums2)
+{
+    printf(QString("%1 - %2 (%3%%)\n")
+                .arg(match.id1)
+                .arg(match.id2)
+                .arg(match.similarity)
+            .toAscii().data());
+
+    QTableWidget *t = ui->threadsTable;
+    int row = t->rowCount();
+    t->insertRow(row);
+
+    QStringList pidtid1 = match.id1.split("-");
+    QStringList pidtid2 = match.id2.split("-");
+
+    QString fname1 = QDir(sessionDir).filePath(QString("0-%1.csv").arg(match.id1));
+    QString firstLine1;
+    if (!getFirstLine(fname1, firstLine1)) return;
+
+    int comma=0;
+    for (int i=0; i<4; i++) {
+        int ncomma = firstLine1.indexOf(',', comma);
+        if (ncomma<0) { comma=0; break; }
+        comma = ncomma+1;
+    }
+
+    QString items[] = {
+        pidtid1[0],
+        pidtid2[0],
+        pidtid1[1],
+        pidtid2[1],
+        QString::number(lineNums1[match.id1]),
+        QString::number(lineNums2[match.id2]),
+        QString().sprintf("%.0f%%", match.similarity),
+        firstLine1.right(firstLine1.size()-comma),
+    };
+    for (int col=0; col<8; col++)
+        t->setItem(row, col, new QTableWidgetItem(items[col]));
+}
+
 void LogDiff::processLogs()
 {
     if (ui->log1Edit->text().isEmpty() ||
@@ -392,63 +508,36 @@ void LogDiff::processLogs()
     if (!splitThreads(1, ids2, lineNums2, slow))
         return;
 
-    QList<Match> matchLst;
-    if (!matchThreads(ids1, ids2, lineNums1, matchLst, slow))
-        return;
+    QList<Match> bestMatches, otherMatches;
+    if (!matchThreads(ids1, ids2, lineNums1, bestMatches, otherMatches, slow))
+        return;    
+
+    printf("--- best matches\n");
+    foreach (Match match, bestMatches)
+        addMatch(match, lineNums1, lineNums2);
 
     QTableWidget *t = ui->threadsTable;
+    int row = t->rowCount();
+    t->insertRow(row);
+    t->setItem(row, t->columnCount()-1, new QTableWidgetItem("--- Other possible matches ---"));
 
-    foreach (Match match, matchLst) {
-        printf(QString("matched %1 - %2 (%3%%)\n")
-                    .arg(match.id1)
-                    .arg(match.id2)
-                    .arg(match.similarity)
-                .toAscii().data());
-
-        int row = t->rowCount();
-        t->insertRow(row);
-
-        QStringList pidtid1 = match.id1.split("-");
-        QStringList pidtid2 = match.id2.split("-");
-
-        QString fname1 = QDir(sessionDir).filePath(QString("0-%1.csv").arg(match.id1));
-        QString fname2 = QDir(sessionDir).filePath(QString("1-%1.csv").arg(match.id2));
-        QString firstLine1, firstLine2;
-        if (!getFirstLine(fname1, firstLine1)) return;
-
-        int comma=0;
-        for (int i=0; i<4; i++) {
-            int ncomma = firstLine1.indexOf(',', comma);
-            if (ncomma<0) { comma=0; break; }
-            comma = ncomma+1;
-        }
-
-        QString items[] = {
-            pidtid1[0],
-            pidtid1[1],
-            pidtid2[0],
-            pidtid2[1],
-            QString::number(lineNums1[match.id1]),
-            QString::number(lineNums2[match.id2]),
-            QString().sprintf("%.0f%%", match.similarity),
-            firstLine1.right(firstLine1.size()-comma),
-        };
-
-        for (int col=0; col<8; col++)
-            t->setItem(row, col, new QTableWidgetItem(items[col]));
-    }
+    printf("--- other matches\n");
+    foreach (Match match, otherMatches)
+        addMatch(match, lineNums1, lineNums2);
 }
 
 void LogDiff::on_threadsTable_cellDoubleClicked(int row, int)
 {
+    QString extn = ui->ignoreNumbersCheck->isChecked() ? "match" : "csv";
+
     QTableWidget *t = ui->threadsTable;
     QString pid1 = t->item(row, 0)->text();
-    QString tid1 = t->item(row, 1)->text();
-    QString pid2 = t->item(row, 2)->text();
+    QString pid2 = t->item(row, 1)->text();
+    QString tid1 = t->item(row, 2)->text();
     QString tid2 = t->item(row, 3)->text();
 
-    QString fname1 = QDir(sessionDir).filePath(QString("0-%1-%2.csv").arg(pid1).arg(tid1));
-    QString fname2 = QDir(sessionDir).filePath(QString("1-%1-%2.csv").arg(pid2).arg(tid2));
+    QString fname1 = QDir(sessionDir).filePath(QString("0-%1-%2.%3").arg(pid1).arg(tid1).arg(extn));
+    QString fname2 = QDir(sessionDir).filePath(QString("1-%1-%2.%3").arg(pid2).arg(tid2).arg(extn));
 
     QProcess kdiff3Proc;
     if (!kdiff3Proc.startDetached("kdiff3", QStringList() <<
