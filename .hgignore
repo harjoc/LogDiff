@@ -1,0 +1,12 @@
+syntax: glob
+*.pro.user
+*.pdb
+Makefile*
+debug
+release
+diff.exe
+kdiff3.exe
+inputs
+logdiff.log
+ui_logdiff.h
+
