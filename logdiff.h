@@ -5,6 +5,7 @@
 
 #include <QThread>
 #include <QProgressDialog>
+#include <QRunnable>
 #include <QHash>
 #include <QEvent>
 
@@ -30,30 +31,27 @@ struct Match {
     }*/
 };
 
-class DiffThread: public QThread
+class DiffTask: public QRunnable
 {
-    Q_OBJECT
-
 public:
-    DiffThread(QObject *parent, const QString &sessionDir, const QStringList &ids1, const QStringList &ids2):
-        QThread(parent),
-        sessionDir(sessionDir), ids1(ids1), ids2(ids2),
-        errStr() { }
+    DiffTask(QObject *parent, const QString &sessionDir, const QString &id1, const QStringList &ids2):
+        QRunnable(),
+        parent(parent),
+        sessionDir(sessionDir), id1(id1), ids2(ids2) { }
 
-    QString getError() { return errStr; }
-
-protected:
     void run();
 
 private:
+    void postError(const QString &error);
+
+    QObject *parent;
     QString sessionDir;
-    QStringList ids1;
+    QString id1;
     QStringList ids2;
-    QString errStr;
 };
 
 const QEvent::Type ThreadMatchEventType = (QEvent::Type)9493;
-const QEvent::Type ThreadDoneEventType = (QEvent::Type)9494;
+const QEvent::Type ThreadErrorEventType = (QEvent::Type)9494;
 
 class ThreadMatchEvent: public QEvent {
 public:
@@ -64,13 +62,13 @@ public:
     QList<Match> *matches;
 };
 
-class ThreadDoneEvent: public QEvent {
+class ThreadErrorEvent: public QEvent {
 public:
-    ThreadDoneEvent(DiffThread *thread):
-        QEvent(ThreadDoneEventType),
-        thread(thread) { }
+    ThreadErrorEvent(const QString &error):
+        QEvent(ThreadErrorEventType),
+        error(error) { }
 
-    DiffThread *thread;
+    QString error;
 };
 
 class LogDiff : public QMainWindow
@@ -113,8 +111,8 @@ private:
     QHash<QString, int> lineNums1;
     QHash<QString, int> lineNums2;
 
-    QList<DiffThread *> threads;
-    QString threadError;
+    int diffsDone;
+    bool diffsFailed;
 
     QList<Match> matches;
     QProgressDialog matchProgress;
