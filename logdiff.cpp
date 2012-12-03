@@ -263,42 +263,16 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
     return ret;
 }
 
-bool LogDiff::matchThreads(
-        const QStringList &ids1,
-        const QStringList &ids2,
-        const QHash<QString, int> &lineNums1,
-        const QHash<QString, int> &lineNums2,
-        QList<Match> &bestMatches,
-        QList<Match> &otherMatches,
-        bool &slow)
+void DiffThread::run()
 {
-    QList<Match> matches;
-
-    QProgressDialog progress;
-    progress.setLabelText(QString("Matching %1*%2 threads ...").arg(ids1.size()).arg(ids2.size()));
-    progress.setMinimum(0);
-    progress.setMaximum(ids1.size());
-    progress.setMinimumDuration(500);
-    progress.setValue(0);
-
-    if (slow) {
-        progress.show();
-        QApplication::processEvents();
-    }
-
     QStringList fnameList2;
     foreach (QString id2, ids2)
         fnameList2.append(QString("1-%1.match").arg(id2)); // we start diff in sessionDir
 
     for (int i1=0; i1<ids1.size(); i1++) {
-        progress.setValue(i1);
         QString id1 = ids1.at(i1);
 
-        QApplication::processEvents();
-        if (progress.wasCanceled())
-            return false;
-
-        // diff id1 agains all ids2 in one go (creating processes in windows is slow)
+        // diff id1 against all ids2 in one go (creating processes in windows is slow)
 
         QString fname1 = QString("0-%1.match").arg(id1); // we start diff in sessionDir
 
@@ -314,13 +288,15 @@ bool LogDiff::matchThreads(
         diffProc.start("diff", args);
 
         if (!diffProc.waitForFinished() || diffProc.exitCode() >= 2) {
-            error("Diff error", QString("Could not compare %1 to log #2").arg(fname1));
-            return false;
+            errStr = QString("Could not compare %1 to log #2").arg(fname1);
+            return;
         }
 
         int i2=0;
 
         QString hdr1 = diffProc.readLine(1024);
+
+        QList<Match> *matches = new QList<Match>();
 
         for (;;) {
             // hdr1 is also left for us by at the end of this loop below
@@ -328,39 +304,44 @@ bool LogDiff::matchThreads(
             QString hdr2 = diffProc.readLine(1024);
 
             if (hdr1.isEmpty() ^ hdr2.isEmpty()) {
-                error("Diff error", QString("Incomplete diff output for %1").arg(fname1));
-                return false;
+                errStr = QString("Incomplete diff output for %1").arg(fname1);
+                delete matches;
+                return;
             }
 
             if (hdr1.isEmpty())
                 break;
 
             if (!hdr1.startsWith("--- 0-") || !hdr2.startsWith("+++ 1-")) {
-                error("Diff error", QString("Expecting ---/+++ and prefixes in diff output for %1").arg(fname1));
-                return false;
+                errStr = QString("Expecting ---/+++ and prefixes in diff output for %1").arg(fname1);
+                delete matches;
+                return;
             }
 
             int sp1 = hdr1.indexOf('\t', 6);
             int sp2 = hdr2.indexOf('\t', 6);
             if (sp1 < 0 || sp2 < 0) {
-                error("Diff error", QString("Could not get name from diff output for %1").arg(fname1));
-                return false;
+                errStr = QString("Could not get name from diff output for %1").arg(fname1);
+                delete matches;
+                return;
             }
 
             QString name1 = hdr1.mid(6, sp1-6);
             QString name2 = hdr2.mid(6, sp2-6);
 
             if (!name1.endsWith(".match") || !name2.endsWith(".match")) {
-                error("Diff error", QString("Unexpected names from diff output: %1 and %2").arg(name1).arg(name2));
-                return false;
+                errStr = QString("Unexpected names from diff output: %1 and %2").arg(name1).arg(name2);
+                delete matches;
+                return;
             }
 
             name1.truncate(name1.size()-6);
             name2.truncate(name2.size()-6);
 
             if (name1 != id1) {
-                error("Diff error", QString("Unexpected 'from' file in diff output for %1: %2").arg(fname1).arg(name1));
-                return false;
+                errStr = QString("Unexpected 'from' file in diff output for %1: %2").arg(fname1).arg(name1);
+                delete matches;
+                return;
             }
 
             QString id2;
@@ -370,13 +351,14 @@ bool LogDiff::matchThreads(
                 id2 = ids2.at(i2);
                 if (id2 == name2) break;
 
-                matches.append(Match(0, 0, lineNums1[id1], lineNums2[id2], id1, id2));
+                matches->append(Match(0, 0, id1, id2));
                 i2++;
             }
 
             if (i2 == ids2.size()) {
-                error("Diff error", QString("Unexpected 'to' file in diff output for %1: %2").arg(fname1).arg(name2));
-                return false;
+                errStr = QString("Unexpected 'to' file in diff output for %1: %2").arg(fname1).arg(name2);
+                delete matches;
+                return;
             }
 
             // done with the header, now count the removed lines
@@ -400,8 +382,7 @@ bool LogDiff::matchThreads(
                     additions++;
             }
 
-            matches.append(Match(removals, additions,
-                    lineNums1[id1], lineNums2[id2],
+            matches->append(Match(removals, additions,
                     id1, id2));
 
             i2++;
@@ -410,23 +391,88 @@ bool LogDiff::matchThreads(
         // end of diff output, so the rest of the files are identical
         while (i2 < ids2.size()) {
             QString id2 = ids2.at(i2);
-            matches.append(Match(0, 0, lineNums1[id1], lineNums2[id2], id1, id2));
+            matches->append(Match(0, 0, id1, id2));
             i2++;
         }
+
+        QApplication::postEvent(parent(), new ThreadMatchEvent(matches));
+        // the gui thread will delete matches
     }
 
+    QApplication::postEvent(parent(), new ThreadDoneEvent(this));
+}
+
+void LogDiff::customEvent(QEvent *event)
+{
+    switch (event->type()) {
+        case ThreadMatchEventType:
+        {
+            ThreadMatchEvent *mevent = (ThreadMatchEvent *)event;
+
+            printf("got %d matches\n", mevent->matches->size());
+
+            matchProgress.setValue(matchProgress.value() + 1);
+
+            matches.append(*mevent->matches);
+            delete mevent->matches;
+            break;
+        }
+
+        case ThreadDoneEventType:
+        {
+            ThreadDoneEvent *devent = (ThreadDoneEvent *)event;
+            DiffThread *thread = devent->thread;
+
+            int pos = threads.indexOf(thread);
+            if (pos < 0) {
+                error("Diff error", "Unexpected thread event");
+                break;
+            }
+            threads.removeAt(pos);
+
+            thread->wait();
+
+            QString thrError = thread->getError();
+            if (!thrError.isEmpty() && threadError.isEmpty())
+                threadError = thrError;
+
+            delete thread;
+
+            if (threads.isEmpty())
+                selectMatches();
+
+            break;
+        }
+
+        default:
+            QMainWindow::customEvent(event);
+    }
+}
+
+void LogDiff::selectMatches()
+{
+    if (!threadError.isEmpty()) {
+        error("Diff error", threadError);
+        return;
+    }
+
+    if (matches.size() != ids1.size() * ids2.size()) {
+        error("Diff error", QString("Only collected %1 results out of %2")
+              .arg(matches.size()).arg(ids1.size() * ids2.size()));
+        return;
+    }
+
+    // all diffs are done, now match threads
 
     QHash<QString,QString> matchSet;
 
-    // maybe:
-    //   (total1-removals) + (total2-additions) / (total1+total2)
-    // works better
+    QList<Match> bestMatches, otherMatches;
 
     foreach (QString id1, ids1) {
         Match best;
         foreach (Match match, matches)
             if (match.id1 == id1)
-                if (best.lines1 < 0 || best.lines1-best.removals < match.lines1-match.removals)
+                if (best.removals < 0 || lineNums1[best.id1]-best.removals < lineNums1[match.id1]-match.removals)
                     best = match;
 
         matchSet[id1] = best.id2;
@@ -437,15 +483,72 @@ bool LogDiff::matchThreads(
         Match best;
         foreach (Match match, matches)
             if (match.id2 == id2)
-                if (best.lines2 < 0 || best.lines2-best.additions < match.lines2-match.additions)
+                if (best.removals < 0 || lineNums2[best.id2]-best.additions < lineNums2[match.id2]-match.additions)
                     best = match;
 
         if (matchSet[best.id1] != best.id2)
             otherMatches.append(best);
     }
 
-    slow |= progress.isVisible();
-    return true;
+    foreach (Match match, bestMatches)
+        if (!addMatch(match)) {
+            ui->threadsTable->setRowCount(0);
+            return;
+        }
+
+    if (!otherMatches.isEmpty()) {
+        QTableWidget *t = ui->threadsTable;
+        int row = t->rowCount();
+        t->insertRow(row);
+        t->setItem(row, t->columnCount()-1, new QTableWidgetItem("--- Other possible matches ---"));
+
+        foreach (Match match, otherMatches)
+            if (!addMatch(match)) {
+                ui->threadsTable->setRowCount(0);
+                return;
+            }
+    }
+}
+
+void LogDiff::matchThreads(bool &slow)
+{
+    matches.clear();
+
+    matchProgress.setLabelText(QString("Matching %1*%2 threads ...").arg(ids1.size()).arg(ids2.size()));
+    matchProgress.setMinimum(0);
+    matchProgress.setMaximum(ids1.size());
+    matchProgress.setMinimumDuration(250);
+    matchProgress.setValue(0);
+
+    if (slow) {
+        matchProgress.show();
+        QApplication::processEvents();
+    }
+
+    QStringList fnameList2;
+    foreach (QString id2, ids2)
+        fnameList2.append(QString("1-%1.match").arg(id2)); // we start diff in sessionDir
+
+    // run several diffs in parallel
+
+    int nthreads = QThread::idealThreadCount();
+    if (nthreads < 0)
+        nthreads = 1;
+
+    threads.clear();
+    threadError.clear();
+
+    for (int n=0; n<nthreads; n++) {
+        QStringList subids1;
+        int i0 = ids1.size() * (n+0) / nthreads;
+        int i1 = ids1.size() * (n+1) / nthreads;
+        for (int i=i0; i<i1; i++)
+            subids1.append(ids1.at(i));
+
+        DiffThread *t = new DiffThread(this, sessionDir, subids1, ids2);
+        t->start();
+        threads.append(t);
+    }
 }
 
 bool LogDiff::getFirstLine(const QString &fname, QString &firstLine)
@@ -462,16 +565,8 @@ bool LogDiff::getFirstLine(const QString &fname, QString &firstLine)
     return true;
 }
 
-void LogDiff::addMatch(const Match &match,
-    QHash<QString, int> lineNums1,
-    QHash<QString, int> lineNums2)
+bool LogDiff::addMatch(const Match &match)
 {
-    printf(QString("%1 - %2 (%3%%)\n")
-                .arg(match.id1)
-                .arg(match.id2)
-                .arg(match.similarity())
-            .toAscii().data());
-
     QTableWidget *t = ui->threadsTable;
     int row = t->rowCount();
     t->insertRow(row);
@@ -481,7 +576,7 @@ void LogDiff::addMatch(const Match &match,
 
     QString fname1 = QDir(sessionDir).filePath(QString("0-%1.csv").arg(match.id1));
     QString firstLine1;
-    if (!getFirstLine(fname1, firstLine1)) return;
+    if (!getFirstLine(fname1, firstLine1)) return false;
 
     int comma=0;
     for (int i=0; i<4; i++) {
@@ -490,6 +585,9 @@ void LogDiff::addMatch(const Match &match,
         comma = ncomma+1;
     }
 
+    double similarity = lineNums1[match.id1] - match.removals;
+    similarity /= lineNums1[match.id1];
+
     QString items[] = {
         pidtid1[0],
         pidtid2[0],
@@ -497,11 +595,13 @@ void LogDiff::addMatch(const Match &match,
         pidtid2[1],
         QString::number(lineNums1[match.id1]),
         QString::number(lineNums2[match.id2]),
-        QString().sprintf("%.0f%%", match.similarity()),
+        QString().sprintf("%.0f%%", similarity),
         firstLine1.right(firstLine1.size()-comma),
     };
     for (int col=0; col<8; col++)
         t->setItem(row, col, new QTableWidgetItem(items[col]));
+
+    return true;
 }
 
 void LogDiff::processLogs()
@@ -513,31 +613,14 @@ void LogDiff::processLogs()
     clearSession();
     initSession();
 
-    QHash<QString, int> lineNums1, lineNums2;
-
-    bool slow=false;
+    bool slow = false;
 
     if (!splitThreads(0, ids1, lineNums1, slow))
         return;
     if (!splitThreads(1, ids2, lineNums2, slow))
         return;
 
-    QList<Match> bestMatches, otherMatches;
-    if (!matchThreads(ids1, ids2, lineNums1, lineNums2, bestMatches, otherMatches, slow))
-        return;    
-
-    printf("--- best matches\n");
-    foreach (Match match, bestMatches)
-        addMatch(match, lineNums1, lineNums2);
-
-    QTableWidget *t = ui->threadsTable;
-    int row = t->rowCount();
-    t->insertRow(row);
-    t->setItem(row, t->columnCount()-1, new QTableWidgetItem("--- Other possible matches ---"));
-
-    printf("--- other matches\n");
-    foreach (Match match, otherMatches)
-        addMatch(match, lineNums1, lineNums2);
+    matchThreads(slow);
 }
 
 void LogDiff::on_threadsTable_cellDoubleClicked(int row, int)
