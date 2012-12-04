@@ -87,23 +87,37 @@ private slots:
 
     void on_threadsTable_cellDoubleClicked(int row, int);
 
+    void on_searchEdit_returnPressed();
+
+    void on_searchBtn_clicked();
+
 private:
     Ui::LogDiff *ui;
 
+    void clearSession();
+    bool initSession();
     void error(const QString &title, const QString &text);
+
     void processLogs();
     bool splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lineNums, bool &slow);
     void customEvent(QEvent *event);
     void matchThreads(bool &slow);
     void selectMatches();
+
     bool getFirstLine(const QString &fname, QString &firstLine);
-    bool addMatch(const Match &match);
-    void clearSession();
-    bool initSession();
+    QString trimFirstLine(const QString &line);
+    void addMatches(const QList<Match> &best, const QList<Match> &other,
+            const QHash<quint64, QString> firstLines1, const QHash<quint64, QString> firstLines2);
+    bool addMatch(const Match &match, const QString &firstLine);
+
+    bool grepFile(const QString &fname, const QString &text, QHash<quint64, QString> &matches);
 
     // fields
 
     QString sessionDir;
+
+    int pidCol;
+    int tidCol;
 
     QStringList ids1;
     QStringList ids2;
@@ -115,7 +129,10 @@ private:
     bool diffsFailed;
 
     QList<Match> matches;
+    QList<Match> bestMatches;
+    QList<Match> otherMatches;
     QProgressDialog matchProgress;
+
 };
 
 #endif // LOGDIFF_H

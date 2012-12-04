@@ -13,12 +13,6 @@
 #include <sys/time.h>
 #endif
 
-/*
-
-- if you select multiple files in 'open #1', use 2nd as file #2
-
-*/
-
 LogDiff::LogDiff(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::LogDiff)
@@ -31,7 +25,7 @@ LogDiff::LogDiff(QWidget *parent) :
             "PID1" << "PID2" <<
             "TID1" << "TID2" <<
             "Lines1" << "Lines2" <<
-            "Similarity" << "First line";
+            "Similar" << "First line";
 
     int widths[] = {40, 40, 40, 40, 45, 45, 48, 48, 30};
 
@@ -138,7 +132,7 @@ bool LogDiff::initSession()
     struct timeval tv;
     gettimeofday(&tv);
 
-    sessionDir = QString().sprintf("logdiff-%d%03d", tv.tv_sec, tv.tv_usec / 1000);
+    sessionDir = QDir::tempPath() + QString().sprintf("/logdiff-%d%03d", tv.tv_sec, tv.tv_usec / 1000);
 
     if (!QDir().mkpath(sessionDir)) {
         error("Session error", QString("Error creating dir %1").arg(sessionDir));
@@ -187,6 +181,9 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
         progress.show();
         QApplication::processEvents();
     }
+
+    pidCol = 2;
+    tidCol = 3;
 
     bool firstLine = true;
 
@@ -443,7 +440,8 @@ void LogDiff::selectMatches()
 
     QHash<QString,QString> matchSet;
 
-    QList<Match> bestMatches, otherMatches;
+    bestMatches.clear();
+    otherMatches.clear();
 
     foreach (QString id1, ids1) {
         Match best;
@@ -467,23 +465,53 @@ void LogDiff::selectMatches()
             otherMatches.append(best);
     }
 
-    foreach (Match match, bestMatches)
-        if (!addMatch(match)) {
+    QHash<quint64, QString> empty;
+    addMatches(bestMatches, otherMatches, empty, empty);
+}
+
+quint64 stridToIntid(const QString &id)
+{
+    QByteArray idba = id.toAscii();
+    const char *data = idba.data();
+    quint64 pid = atoi(data);
+
+    const char *dash = strchr(data, '-');
+    quint64 tid = dash ? atoi(dash+1) : 0;
+
+    return tid | (pid << 32);
+}
+
+void LogDiff::addMatches(const QList<Match> &best, const QList<Match> &other, const QHash<quint64, QString> firstLines1, const QHash<quint64, QString> firstLines2)
+{
+    ui->threadsTable->setRowCount(0);
+
+    foreach (Match match, best) {
+        QString fline1 = firstLines1[stridToIntid(match.id1)];
+        QString fline2 = firstLines2[stridToIntid(match.id2)];
+        QString fline = !fline1.isEmpty() ? fline1 : (!fline2.isEmpty() ? fline2 : QString());
+
+        if (!addMatch(match, fline)) {
             ui->threadsTable->setRowCount(0);
             return;
         }
+    }
 
     if (!otherMatches.isEmpty()) {
         QTableWidget *t = ui->threadsTable;
         int row = t->rowCount();
         t->insertRow(row);
         t->setItem(row, t->columnCount()-1, new QTableWidgetItem("--- Other possible matches ---"));
+    }
 
-        foreach (Match match, otherMatches)
-            if (!addMatch(match)) {
-                ui->threadsTable->setRowCount(0);
-                return;
-            }
+    foreach (Match match, other) {
+        QString fline1 = firstLines1[stridToIntid(match.id1)];
+        QString fline2 = firstLines2[stridToIntid(match.id2)];
+        QString fline = !fline1.isEmpty() ? fline1 : (!fline2.isEmpty() ? fline2 : QString());
+
+        if (!addMatch(match, fline)) {
+            ui->threadsTable->setRowCount(0);
+            return;
+        }
     }
 }
 
@@ -509,6 +537,18 @@ void LogDiff::matchThreads(bool &slow)
         QThreadPool::globalInstance()->start(new DiffTask(this, sessionDir, id1, ids2));
 }
 
+QString LogDiff::trimFirstLine(const QString &line)
+{
+    int comma=0;
+    for (int i=0; i<4; i++) {
+        int ncomma = line.indexOf(',', comma);
+        if (ncomma<0) { comma=0; break; }
+        comma = ncomma+1;
+    }
+
+    return line.right(line.size()-comma);
+}
+
 bool LogDiff::getFirstLine(const QString &fname, QString &firstLine)
 {
     QFile f(fname);
@@ -517,13 +557,11 @@ bool LogDiff::getFirstLine(const QString &fname, QString &firstLine)
         return false;
     }
 
-    QString line = f.readLine(1024).trimmed();
-
-    firstLine = line;
+    firstLine = f.readLine(1024).trimmed();
     return true;
 }
 
-bool LogDiff::addMatch(const Match &match)
+bool LogDiff::addMatch(const Match &match, const QString &firstLine)
 {
     QTableWidget *t = ui->threadsTable;
     int row = t->rowCount();
@@ -533,14 +571,12 @@ bool LogDiff::addMatch(const Match &match)
     QStringList pidtid2 = match.id2.split("-");
 
     QString fname1 = QDir(sessionDir).filePath(QString("0-%1.csv").arg(match.id1));
-    QString firstLine1;
-    if (!getFirstLine(fname1, firstLine1)) return false;
+    QString line;
 
-    int comma=0;
-    for (int i=0; i<4; i++) {
-        int ncomma = firstLine1.indexOf(',', comma);
-        if (ncomma<0) { comma=0; break; }
-        comma = ncomma+1;
+    if (!firstLine.isEmpty()) {
+        line = firstLine;
+    } else {
+        if (!getFirstLine(fname1, line)) return false;
     }
 
     double similarity = lineNums1[match.id1] - match.removals;
@@ -554,7 +590,7 @@ bool LogDiff::addMatch(const Match &match)
         QString::number(lineNums1[match.id1]),
         QString::number(lineNums2[match.id2]),
         QString().sprintf("%.0f%%", similarity*100),
-        firstLine1.right(firstLine1.size()-comma),
+        trimFirstLine(line),
     };
     for (int col=0; col<8; col++)
         t->setItem(row, col, new QTableWidgetItem(items[col]));
@@ -603,4 +639,100 @@ void LogDiff::on_threadsTable_cellDoubleClicked(int row, int)
         error("Match error", QString("Could not start kdiff3 %1 %2").arg(fname1).arg(fname2));
         return;
     }
+}
+
+bool LogDiff::grepFile(const QString &fname, const QString &text, QHash<quint64, QString> &matches)
+{
+    QStringList args;
+    if (ui->regexpCheck->isChecked())
+        args << "-E";
+    args << text
+         << fname;
+
+    QProcess grepProc;
+    grepProc.start("grep", args);
+
+    if (!grepProc.waitForFinished() || grepProc.exitCode() >= 2) {
+        error("Search error", QString("Could not run grep on %1").arg(fname));
+        return false;
+    }
+
+    for (;;) {
+        char line[1024];
+        qint64 len = grepProc.readLine(line, sizeof(line));
+        if (len <= 0) break;
+
+        quint64 pid, tid;
+
+        const char *ptr = line;
+
+        int colMin = min(pidCol, tidCol);
+        int colMax = max(pidCol, tidCol);
+
+        for (int i=0; i<colMin; i++) {
+            ptr = strchr(ptr, ',');
+            if (ptr) ptr++; else break;
+        }
+
+        ((pidCol < tidCol) ? pid : tid) = atoi(ptr+1);
+
+        for (int i=colMin; i<colMax; i++) {
+            ptr = strchr(ptr, ',');
+            if (ptr) ptr++; else break;
+        }
+
+        ((pidCol < tidCol) ? tid : pid) = atoi(ptr+1);
+
+        quint64 id = tid | (pid << 32);
+        if (!matches.contains(id))
+            matches[id] = QByteArray(line, len).trimmed();
+    }
+
+    /*foreach (quint64 id, tmpMatches.keys()) {
+        QString strId = QString("%1-%2").arg((int)(id >> 32)).arg((int)id);
+        matches[strId] = tmpMatches[id];
+        //printf("%s: %s\n", strId.toAscii().data(), tmpMatches[id].toAscii().data());
+    }*/
+
+    return true;
+}
+
+
+void LogDiff::on_searchBtn_clicked()
+{
+    const QString &text = ui->searchEdit->text();
+
+    QHash<quint64, QString> lines1;
+    QHash<quint64, QString> lines2;
+
+    if (!text.isEmpty()) {
+        if (!grepFile(ui->log1Edit->text(), text, lines1))
+            return;
+        if (!grepFile(ui->log2Edit->text(), text, lines2))
+            return;
+    }
+
+    QList<Match> bestMatchesFiltered;
+    QList<Match> otherMatchesFiltered;
+
+    foreach (Match match, bestMatches) {
+        quint64 nid1 = stridToIntid(match.id1);
+        quint64 nid2 = stridToIntid(match.id2);
+        if (lines1.contains(nid1) || lines2.contains(nid2))
+            bestMatchesFiltered.append(match);
+    }
+
+    foreach (Match match, otherMatches) {
+        quint64 nid1 = stridToIntid(match.id1);
+        quint64 nid2 = stridToIntid(match.id2);
+        if (lines1.contains(nid1) || lines2.contains(nid2))
+            otherMatchesFiltered.append(match);
+    }
+
+    addMatches(bestMatchesFiltered, otherMatchesFiltered, lines1, lines2);
+}
+
+void LogDiff::on_searchEdit_returnPressed()
+{
+    on_searchBtn_clicked();
 }

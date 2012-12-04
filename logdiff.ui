@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>673</width>
-    <height>484</height>
+    <width>575</width>
+    <height>491</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -20,7 +20,7 @@
       <item>
        <widget class="QLabel" name="label">
         <property name="text">
-         <string>Log 1</string>
+         <string>Log 1:</string>
         </property>
        </widget>
       </item>
@@ -47,7 +47,7 @@
       <item>
        <widget class="QLabel" name="label_2">
         <property name="text">
-         <string>Log 2</string>
+         <string>Log 2:</string>
         </property>
        </widget>
       </item>
@@ -77,34 +77,34 @@
      </widget>
     </item>
     <item>
+     <widget class="QLabel" name="label_3">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="text">
+       <string>Threads (doubleclick for diff):</string>
+      </property>
+     </widget>
+    </item>
+    <item>
      <layout class="QHBoxLayout" name="horizontalLayout_3">
       <item>
-       <widget class="QLabel" name="label_3">
+       <widget class="QLineEdit" name="searchEdit"/>
+      </item>
+      <item>
+       <widget class="QPushButton" name="searchBtn">
         <property name="text">
-         <string>Threads (doubleclick for diff)</string>
+         <string>Search</string>
         </property>
        </widget>
       </item>
       <item>
-       <spacer name="horizontalSpacer">
-        <property name="orientation">
-         <enum>Qt::Horizontal</enum>
-        </property>
-        <property name="sizeHint" stdset="0">
-         <size>
-          <width>40</width>
-          <height>20</height>
-         </size>
-        </property>
-       </spacer>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="ignoreNumbersCheck">
+       <widget class="QCheckBox" name="regexpCheck">
         <property name="text">
-         <string>Ignore numbers</string>
-        </property>
-        <property name="checked">
-         <bool>true</bool>
+         <string>Regexp</string>
         </property>
        </widget>
       </item>
@@ -135,6 +135,33 @@
       </attribute>
      </widget>
     </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_4">
+      <item>
+       <spacer name="horizontalSpacer">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="ignoreNumbersCheck">
+        <property name="text">
+         <string>Ignore numbers</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
    </layout>
   </widget>
   <widget class="QMenuBar" name="menuBar">
@@ -142,7 +169,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>673</width>
+     <width>575</width>
      <height>23</height>
     </rect>
    </property>
