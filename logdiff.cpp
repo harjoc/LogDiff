@@ -142,6 +142,10 @@ bool LogDiff::initSession()
     ids1.clear();
     ids2.clear();
 
+    pidCol = -1;
+    tidCol = -1;
+    operCol = -1;
+
     return true;
 }
 
@@ -182,9 +186,6 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
         QApplication::processEvents();
     }
 
-    pidCol = 2;
-    tidCol = 3;
-
     bool firstLine = true;
 
     for (int counter=0; ; counter++) {
@@ -194,7 +195,34 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
         QByteArray line = logFile.readLine(1024);
         if (firstLine) {
             firstLine = false;
-            removeBom(line);
+
+            // "Time of Day","Process Name","PID","Operation","Path","Result","Detail","TID"
+
+            int pidPos  = line.indexOf("\"PID\"");
+            int tidPos  = line.indexOf("\"TID\"");
+            int operPos = line.indexOf("\"Operation\"");
+            if (pidPos < 0 || tidPos < 0 || operPos < 0) {
+                error("Load error", QString("PID, TID, and Operation fields not present in %1").arg(logFname));
+                ret = false;
+                break;
+            }
+
+            int newPidCol  = line.left(pidPos).count(',');
+            int newTidCol  = line.left(tidPos).count(',');
+            int newOperCol = line.left(operPos).count(',');
+
+            if (pidCol < 0) {
+                pidCol  = newPidCol;
+                tidCol  = newTidCol;
+                operCol = newOperCol;
+            } else if (pidCol != newPidCol || tidCol != newTidCol || operCol != newOperCol) {
+                error("Load error", QString("Positions of PID, TID and Operation fields differ (%1,%2,%3 vs %4,%5,%6)")
+                      .arg(pidCol).arg(tidCol).arg(operCol).arg(newPidCol).arg(newTidCol).arg(newOperCol));
+                ret = false;
+                break;
+            }
+
+            continue;
         }
 
         if (line.isEmpty()) break;
@@ -496,7 +524,7 @@ void LogDiff::addMatches(const QList<Match> &best, const QList<Match> &other, co
         }
     }
 
-    if (!otherMatches.isEmpty()) {
+    if (!other.isEmpty()) {
         QTableWidget *t = ui->threadsTable;
         int row = t->rowCount();
         t->insertRow(row);
@@ -540,7 +568,7 @@ void LogDiff::matchThreads(bool &slow)
 QString LogDiff::trimFirstLine(const QString &line)
 {
     int comma=0;
-    for (int i=0; i<4; i++) {
+    for (int i=0; i<operCol; i++) {
         int ncomma = line.indexOf(',', comma);
         if (ncomma<0) { comma=0; break; }
         comma = ncomma+1;
@@ -687,12 +715,6 @@ bool LogDiff::grepFile(const QString &fname, const QString &text, QHash<quint64,
         if (!matches.contains(id))
             matches[id] = QByteArray(line, len).trimmed();
     }
-
-    /*foreach (quint64 id, tmpMatches.keys()) {
-        QString strId = QString("%1-%2").arg((int)(id >> 32)).arg((int)id);
-        matches[strId] = tmpMatches[id];
-        //printf("%s: %s\n", strId.toAscii().data(), tmpMatches[id].toAscii().data());
-    }*/
 
     return true;
 }

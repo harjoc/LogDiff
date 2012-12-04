@@ -118,6 +118,7 @@ private:
 
     int pidCol;
     int tidCol;
+    int operCol;
 
     QStringList ids1;
     QStringList ids2;
