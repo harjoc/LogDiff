@@ -674,6 +674,8 @@ bool LogDiff::grepFile(const QString &fname, const QString &text, QHash<quint64,
     QStringList args;
     if (ui->regexpCheck->isChecked())
         args << "-E";
+    if (ui->nocaseCheck->isChecked())
+        args << "-i";
     args << text
          << fname;
 
