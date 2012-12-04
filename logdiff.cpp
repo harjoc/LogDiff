@@ -36,11 +36,6 @@ LogDiff::LogDiff(QWidget *parent) :
          t->horizontalHeaderItem(i)->setTextAlignment(Qt::AlignLeft);
          t->setColumnWidth(i, widths[i]);
     }
-
-    #if 0
-    ui->log1Edit->setText("D:/dev/logdiff/inputs/s1.csv");
-    ui->log2Edit->setText("D:/dev/logdiff/inputs/s2.csv");
-    #endif
 }
 
 LogDiff::~LogDiff()
@@ -729,12 +724,15 @@ void LogDiff::on_searchBtn_clicked()
     QHash<quint64, QString> lines1;
     QHash<quint64, QString> lines2;
 
-    if (!text.isEmpty()) {
-        if (!grepFile(ui->log1Edit->text(), text, lines1))
-            return;
-        if (!grepFile(ui->log2Edit->text(), text, lines2))
-            return;
+    if (text.isEmpty()) {
+        addMatches(bestMatches, otherMatches, lines1, lines2);
+        return;
     }
+
+    if (!grepFile(ui->log1Edit->text(), text, lines1))
+        return;
+    if (!grepFile(ui->log2Edit->text(), text, lines2))
+        return;
 
     QList<Match> bestMatchesFiltered;
     QList<Match> otherMatchesFiltered;

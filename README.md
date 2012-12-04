@@ -17,13 +17,14 @@ Tested on Windows, should compile on Unix.
 Links
 -----
 Project page: <https://github.com/patraulea/LogDiff>
+
 Windows Binaries: <https://github.com/patraulea/LogDiff/downloads>
 
 Screenshots
 -----------
-![Thread Matches](https://github.com/patraulea/LogDiff/raw/master/images/logdiff-matches.png)]
+![Thread Matches](https://github.com/patraulea/LogDiff/raw/master/images/logdiff-matches.png)
 
-![Thread Diff](https://github.com/patraulea/LogDiff/raw/master/images/logdiff-diff.png)]
+![Thread Diff](https://github.com/patraulea/LogDiff/raw/master/images/logdiff-diff.png)
 
 Contact
 -------
