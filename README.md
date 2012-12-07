@@ -14,11 +14,19 @@ LogDiff helps you find out what went wrong in a ProcMon trace. It does the follo
 It uses KDiff3, GNU diff and grep, and Qt 4 (the Windows binary includes everything required to run). 
 Tested on Windows, should compile on Unix.
 
-Links
------
+License
+-------
+
+LogDiff is released under the Apache 2.0 License. See the LICENSE file for details.
+
+Downloads
+---------
+
 Project page: <https://github.com/patraulea/LogDiff>
 
 Windows Binaries: <https://github.com/patraulea/LogDiff/downloads>
+
+The 5MB binary will extract Qt libs and the diff/grep tools to %APPDATA%\LogDiff on first run.
 
 Screenshots
 -----------
