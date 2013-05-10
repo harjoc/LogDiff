@@ -163,6 +163,13 @@
     <item>
      <layout class="QHBoxLayout" name="horizontalLayout_4">
       <item>
+       <widget class="QLabel" name="websiteLabel">
+        <property name="text">
+         <string>&lt;a href=&quot;http://github.com/patraulea/LogDiff&quot;&gt;LogDiff 2013-05-10&lt;/a&gt;</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="horizontalSpacer">
         <property name="orientation">
          <enum>Qt::Horizontal</enum>

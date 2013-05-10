@@ -21,6 +21,9 @@ LogDiff::LogDiff(QWidget *parent) :
 {
     ui->setupUi(this);
 
+    ui->websiteLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    ui->websiteLabel->setOpenExternalLinks(true);
+
     QTableWidget *t = ui->threadsTable;
 
     QStringList cols = QStringList() <<
