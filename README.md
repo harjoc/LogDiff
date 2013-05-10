@@ -24,7 +24,8 @@ Downloads
 
 Project page: <https://github.com/patraulea/LogDiff>
 
-Windows Binaries: <https://github.com/patraulea/LogDiff/downloads>
+
+Windows Binaries: <http://sourceforge.net/projects/logdiff/files/>
 
 The 5MB binary will extract Qt libs and the diff/grep tools to %APPDATA%\LogDiff on first run.
 
