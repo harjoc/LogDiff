@@ -224,7 +224,11 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
             int tidPos  = line.indexOf("\"TID\"");
             int operPos = line.indexOf("\"Operation\"");
             if (pidPos < 0 || tidPos < 0 || operPos < 0) {
-                error("Load error", QString("PID, TID, and Operation fields not present in %1").arg(logFname));
+                error("Load error", QString(
+                    "PID, TID, and Operation fields not present in %1.\n"
+                    "\n"
+                    "Add the three columns in Procmon (Options -> Select columns)."
+                    ).arg(logFname));
                 ret = false;
                 break;
             }
