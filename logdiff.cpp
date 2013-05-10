@@ -178,7 +178,7 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
     progress.setLabelText(QString("Splitting log file #%1 ...").arg(logNo+1));
     progress.setMinimum(0);
     progress.setMaximum(100);
-    progress.setMinimumDuration(250);
+    progress.setMinimumDuration(400);
     progress.setValue(0);
 
     if (slow) {
