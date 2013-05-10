@@ -13,6 +13,8 @@
 #include <sys/time.h>
 #endif
 
+#define MAX_LINE_LEN 2048
+
 LogDiff::LogDiff(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::LogDiff)
@@ -187,7 +189,32 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
         if (counter % 2000 == 0)
             QApplication::processEvents();
 
-        QByteArray line = logFile.readLine(1024);
+        QByteArray line = logFile.readLine(MAX_LINE_LEN);
+        if (line.isEmpty()) {
+            if (firstLine) {
+                error("Load error", QString("Empty or unsupported file: ").arg(logFname));
+                ret = false;
+            }
+            break;
+        }
+
+        int lastch = line[line.length()-1];
+        if (lastch != '\r' && lastch != '\n') {
+            if (firstLine) {
+                error("Load error", QString("Unsupported format: %1").arg(logFname));
+                ret = false;
+                break;
+            }
+
+            // we just read an incomplete line. read on till EOL and throw it away
+            do {
+                line = logFile.readLine(MAX_LINE_LEN);
+                if (line.isEmpty()) break;
+                lastch = line[line.length()-1];
+            } while (lastch != '\r' && lastch != '\n');
+            continue;
+        }
+
         if (firstLine) {
             firstLine = false;
 
@@ -206,6 +233,8 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
             int newTidCol  = line.left(tidPos).count(',');
             int newOperCol = line.left(operPos).count(',');
 
+            fieldsNum = line.count(',') + 1;
+
             if (pidCol < 0) {
                 pidCol  = newPidCol;
                 tidCol  = newTidCol;
@@ -222,12 +251,15 @@ bool LogDiff::splitThreads(int logNo, QStringList &ids, QHash<QString, int> &lin
 
         if (line.isEmpty()) break;
 
-        QList<QByteArray> fields = line.split(',');
-        if (fields.size() < 5)
+        QList<QByteArray> fields = line.trimmed().split(',');
+        if (fieldsNum != fields.size())
             continue;
 
-        QString pid = fields[2].mid(1, fields[2].size()-2);
-        QString tid = fields[3].mid(1, fields[3].size()-2);
+        QString pid = fields[pidCol];
+        QString tid = fields[tidCol];
+
+        pid = pid.mid(1, pid.size()-2);
+        tid = tid.mid(1, tid.size()-2);
 
         if (pid.isEmpty() || tid.isEmpty())
             continue;
@@ -315,14 +347,14 @@ void DiffTask::run()
 
     int i2=0;
 
-    QString hdr1 = diffProc.readLine(1024);
+    QString hdr1 = diffProc.readLine(MAX_LINE_LEN);
 
     QList<Match> *matches = new QList<Match>();
 
     for (;;) {
         // hdr1 is also left for us by at the end of this loop below
 
-        QString hdr2 = diffProc.readLine(1024);
+        QString hdr2 = diffProc.readLine(MAX_LINE_LEN);
 
         if (hdr1.isEmpty() ^ hdr2.isEmpty()) {
             postError(QString("Incomplete diff output for %1").arg(fname1));
@@ -391,7 +423,7 @@ void DiffTask::run()
         int removals = 0;
         int additions = 0;
         for (;;) {
-            QString line = diffProc.readLine(1024);
+            QString line = diffProc.readLine(MAX_LINE_LEN);
             if (line.isEmpty() || line.startsWith("--- 0-")) {
                 hdr1 = line;
                 break;
@@ -580,7 +612,7 @@ bool LogDiff::getFirstLine(const QString &fname, QString &firstLine)
         return false;
     }
 
-    firstLine = f.readLine(1024).trimmed();
+    firstLine = f.readLine(MAX_LINE_LEN).trimmed();
     return true;
 }
 
@@ -637,6 +669,15 @@ void LogDiff::processLogs()
     if (!splitThreads(1, ids2, lineNums2, slow))
         return;
 
+    if (lineNums1.size()==0) {
+        error("Load error", QString("Could not read any events: %1").arg(ui->log1Edit->text()));
+        return;
+    }
+    if (lineNums2.size()==0) {
+        error("Load error", QString("Could not read any events: %1").arg(ui->log2Edit->text()));
+        return;
+    }
+
     matchThreads(slow);
 }
 
@@ -669,7 +710,7 @@ bool LogDiff::grepFile(const QString &fname, const QString &text, QHash<quint64,
     QStringList args;
     if (ui->regexpCheck->isChecked())
         args << "-E";
-    if (ui->nocaseCheck->isChecked())
+    if (!ui->matchCaseCheck->isChecked())
         args << "-i";
     args << text
          << fname;
@@ -683,7 +724,7 @@ bool LogDiff::grepFile(const QString &fname, const QString &text, QHash<quint64,
     }
 
     for (;;) {
-        char line[1024];
+        char line[MAX_LINE_LEN];
         qint64 len = grepProc.readLine(line, sizeof(line));
         if (len <= 0) break;
 

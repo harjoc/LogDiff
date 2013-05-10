@@ -116,6 +116,7 @@ private:
 
     QString sessionDir;
 
+    int fieldsNum;
     int pidCol;
     int tidCol;
     int operCol;

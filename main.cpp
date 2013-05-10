@@ -5,8 +5,8 @@
 
 int main(int argc, char *argv[])
 {
-    freopen("logdiff.log", "wb", stdout);
-    setbuf(stdout, NULL);
+    //freopen("logdiff.log", "wb", stdout);
+    //setbuf(stdout, NULL);
 
     QApplication a(argc, argv);
     LogDiff w;

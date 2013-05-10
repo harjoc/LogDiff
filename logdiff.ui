@@ -125,9 +125,9 @@
          </widget>
         </item>
         <item>
-         <widget class="QCheckBox" name="nocaseCheck">
+         <widget class="QCheckBox" name="matchCaseCheck">
           <property name="text">
-           <string>No case</string>
+           <string>Match case</string>
           </property>
          </widget>
         </item>
