@@ -9,7 +9,7 @@ LogDiff helps you find out what went wrong in a ProcMon trace. It does the follo
   (basically identifies which thread is which)
 - displays all the threads and their details in a sortable table
 - edits out all the numbers, timestamps, pointers, etc that shouldn't matter when comparing diffs
-- shows you a visual diff of any pair of threads, so you can see where the differences actually are
+- **shows you a visual diff of any pair of threads, so you can see where the differences actually are**
 
 It uses KDiff3, GNU diff and grep, and Qt 4 (the Windows binary includes everything required to run). 
 Tested on Windows, should compile on Unix.
